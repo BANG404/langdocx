@@ -214,13 +214,13 @@ Place the template at `langdocx/template.docx` or set `DOCX_TEMPLATE` environmen
 
 ---
 
-## Migration Notes
+## Legacy Scripts (Merged)
 
-**Previous Scripts (Now Merged):**
-- ~~`merge_docx.ts`~~ → Use `md2docx.ts merge`
-- ~~`check_docx_pages.ts`~~ → Use `check_stats.ts --docx`
+The following scripts have been unified into newer tools:
+- **`merge_docx.ts`** → Now part of **`md2docx.ts merge`**
+- **`check_docx_pages.ts`** → Now part of **`check_stats.ts --docx`**
 
-**Breaking Changes:** None - all previous functionality is preserved with new unified interfaces.
+All previous functionality is preserved with more robust unified interfaces.
 
 ---
 
@@ -257,16 +257,16 @@ When setting up a new project:
 
 ```mermaid
 graph LR
-    A[Content Files] -->|merge_docx.ts| B[Merged Markdown]
-    B -->|md2docx.ts| C[DOCX Output]
+    A[Content Files] -->|md2docx.ts merge| B[Merged Markdown]
+    B -->|md2docx.ts convert| C[DOCX Output]
     C -->|check_stats.ts| D[Statistics Report]
     D -->|Expand Sections| A
 ```
 
 **Step-by-Step:**
 1. Write content in `content.md` files across directories
-2. Run `merge_docx.ts` to create unified Markdown
-3. Run `md2docx.ts` to generate DOCX with template styling
+2. Run `md2docx.ts merge` to create unified Markdown
+3. Run `md2docx.ts convert` to generate DOCX with template styling
 4. (Optional) Run `check_stats.ts` to verify page count
 5. Expand sections if needed and repeat
 
@@ -301,14 +301,10 @@ graph LR
 ## Troubleshooting
 
 ### Issue: "Bun command not found"
-**Solution:** Install Bun or use Node.js with minor modifications:
+**Solution:** Install Bun:
 ```bash
 # Install Bun
 curl -fsSL https://bun.sh/install | bash
-
-# OR adapt for Node.js
-npm install -g tsx
-tsx merge_docx.ts
 ```
 
 ### Issue: "Pandoc not found"
@@ -334,10 +330,10 @@ ls ../assets/template.docx
 ### Issue: Incorrect heading levels in output
 **Cause:** Directory depth calculation mismatch.
 
-**Solution:** Adjust the `depth` calculation in `merge_docx.ts`:
+**Solution:** Adjust the `depth` calculation in `md2docx.ts`:
 ```typescript
-// Current: depth = relPath.split("/").length - 2
-// Try: depth = relPath.split("/").length - 1
+// Current: depth = Math.max(0, relPath.split("/").length - 2)
+// Try: depth = Math.max(0, relPath.split("/").length - 1)
 const depth = Math.max(0, relPath.split("/").length - YOUR_OFFSET);
 ```
 
@@ -389,7 +385,7 @@ function adjustForLanguage(content: string, lang: "zh" | "en"): string {
 
 ## Script Architecture
 
-### merge_docx.ts Flow
+### md2docx.ts Flow
 ```
 User Config (TARGET_ROOTS)
     ↓
@@ -404,11 +400,6 @@ Adjust heading levels (depth-based)
 Merge with YAML frontmatter
     ↓
 Output: Package_Complete_Draft.md
-```
-
-### md2docx.ts Flow
-```
-Input: Markdown file
     ↓
 preprocessMarkdown() → Clean content
     ↓
@@ -454,7 +445,7 @@ Output: Styled DOCX file
 ### Unit Test Example
 ```typescript
 import { test, expect } from "bun:test";
-import { countContentChars } from "./merge_docx";
+import { countContentChars } from "./md2docx";
 
 test("countContentChars removes comments", () => {
     const input = "Text <!-- comment --> more text";
@@ -481,8 +472,8 @@ test -f test_project/Test_Complete_Draft.md
 
 ### Updating for New Projects
 1. Copy `scripts/` folder to new project
-2. Update `TARGET_ROOTS` in merge_docx.ts
-3. Update `TEMPLATE_PATH` in md2docx.ts
+2. Update `TARGET_ROOTS` in `md2docx.ts`
+3. Update `TEMPLATE_PATH` in `md2docx.ts`
 4. Test with sample content before full run
 
 ### Version Control
