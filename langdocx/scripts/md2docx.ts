@@ -1,66 +1,180 @@
+#!/usr/bin/env bun
 /**
- * md2docx.ts - Markdown 转 DOCX 转换脚本
+ * md2docx.ts - Unified Markdown to DOCX Workflow Tool
  * 
- * 使用 pandoc + reference-doc 模板将 Markdown 转为符合技术方案格式的 DOCX 文件
+ * Combines Markdown merging and DOCX conversion in one tool with granular control
  * 
- * 样式映射 (来自 技术方案(4).docx 分析):
- *   - Heading 1: 一级标题 16pt 宋体加粗, 编号 1.
- *   - Heading 2: 二级标题 15pt 宋体加粗, 编号 1.1.
- *   - Heading 3: 三级标题 14pt 宋体加粗, 编号 1.1.1.
- *   - Heading 4: 四级标题 12pt 宋体加粗, 编号 1.1.1.1.
- *   - Body Text: 正文 12pt 宋体, 首行缩进2字符, 1.5倍行距
- *   - First Paragraph: 标题后第一段 (继承 Body Text)
- *   - Compact: 紧凑列表段落
- *   - Source Code: 代码块 (Consolas 10pt, 灰底边框)
- *   - Block Text: 引用块 (左侧灰色竖线)
- *   - Table Grid: 表格 (全边框)
- *   - Title/Subtitle: 封面标题
+ * Features:
+ * - Merge multiple content.md files from directory structure
+ * - Convert Markdown to DOCX using pandoc with reference template
+ * - Flexible workflow: merge-only, convert-only, or full pipeline
  * 
- * 页面设置: A4, 上下边距 2.54cm, 左右边距 3.17cm
+ * Style mapping (from reference template):
+ *   - Heading 1: Top-level heading with numbering (e.g., 1.)
+ *   - Heading 2: Second-level heading with numbering (e.g., 1.1.)
+ *   - Heading 3: Third-level heading with numbering (e.g., 1.1.1.)
+ *   - Heading 4: Fourth-level heading with numbering (e.g., 1.1.1.1.)
+ *   - Body Text: Normal paragraph with first-line indentation
+ *   - First Paragraph: First paragraph after heading
+ *   - Compact: Compact list paragraph
+ *   - Source Code: Code blocks (monospace font, gray background)
+ *   - Block Text: Blockquote (left gray border)
+ *   - Table Grid: Full-bordered table
+ *   - Title/Subtitle: Cover page titles
+ * 
+ * Page settings: A4, top/bottom margins 2.54cm, left/right margins 3.17cm
  * 
  * Usage:
- *   bun run md2docx.ts <input.md> [output.docx]
- *   bun run md2docx.ts --all          # 转换所有分包
+ *   bun run md2docx.ts merge [--path <dir>]          # Merge only
+ *   bun run md2docx.ts convert <input.md> [out.docx] # Convert only
+ *   bun run md2docx.ts all                           # Full pipeline (default)
+ *   bun run md2docx.ts <input.md> [output.docx]      # Quick convert
  */
 
 import { $ } from "bun";
-import { join, dirname, basename, resolve } from "path";
+import { file, write } from "bun";
+import { join, dirname, basename, resolve, relative } from "path";
 import { existsSync } from "fs";
-import { TARGET_ROOTS, mergePackage } from "./merge_docx";
+import { readdir } from "node:fs/promises";
 
 const PROJECT_ROOT = dirname(import.meta.path);
-const TEMPLATE_PATH = process.env.DOCX_TEMPLATE || join(PROJECT_ROOT, "../assets/template.docx");
+const TEMPLATE_PATH = process.env.DOCX_TEMPLATE || join(PROJECT_ROOT, "../template.docx");
 const TOC_DEPTH = parseInt(process.env.DOCX_TOC_DEPTH || "4");
 
+// ============ Configuration ============
+export let TARGET_ROOTS = [
+    {
+        id: process.env.DOCX_PKG_ID || "Package1",
+        name: process.env.DOCX_PKG_NAME || "Technical Proposal Package 1",
+        path: process.env.DOCX_PKG_PATH || "./01_TechnicalProposal"
+    }
+];
+
+// Override entire config via environment variable if needed
+if (process.env.DOCX_CONFIG) {
+    try {
+        TARGET_ROOTS = JSON.parse(process.env.DOCX_CONFIG);
+    } catch (e) {
+        console.warn("Failed to parse DOCX_CONFIG, using default configuration");
+    }
+}
+
+export const AUTHOR = process.env.DOCX_AUTHOR || "Author Name";
+
+// ============ Markdown Merging Functions ============
+
+async function getFiles(dir: string): Promise<string[]> {
+    const dirents = await readdir(dir, { withFileTypes: true });
+
+    // Sorting: content.md first, then by numeric prefix
+    dirents.sort((a, b) => {
+        if (a.name === "content.md") return -1;
+        if (b.name === "content.md") return 1;
+
+        const numA = parseInt(a.name.match(/^\d+/)?.[0] || "999");
+        const numB = parseInt(b.name.match(/^\d+/)?.[0] || "999");
+
+        if (numA !== numB) return numA - numB;
+        return a.name.localeCompare(b.name);
+    });
+
+    const files: string[] = [];
+    for (const dirent of dirents) {
+        const res = join(dir, dirent.name);
+        if (dirent.isDirectory()) {
+            files.push(...await getFiles(res));
+        } else if (dirent.name === "content.md") {
+            files.push(res);
+        }
+    }
+    return files;
+}
+
+export function countContentChars(text: string) {
+    return text
+        .replace(/<!--.*?-->/gs, "") // Remove comments
+        .replace(/\s+/g, "")         // Remove all whitespace
+        .length;
+}
+
+export async function mergePackage(pkgPath: string, pkgName: string, pkgId: string): Promise<string> {
+    console.log(`\n📦 Merging ${pkgName}...`);
+    const files = await getFiles(pkgPath);
+    let fullContent = "";
+
+    fullContent += `---\n`;
+    fullContent += `title: "${pkgName}"\n`;
+    fullContent += `author: "${AUTHOR}"\n`;
+    fullContent += `date: "${new Date().toLocaleDateString()}"\n`;
+    fullContent += `toc: true\n`;
+    fullContent += `toc-title: "Table of Contents"\n`;
+    fullContent += `--- \n\n`;
+
+    for (const f of files) {
+        const relPath = relative(pkgPath, f);
+        // Directory depth: 01_Overview/content.md → depth 0 (chapter level, H1 unchanged)
+        //                  01_Overview/01_Section/content.md → depth 1 (# becomes ##)
+        const depth = Math.max(0, relPath.split("/").length - 2);
+        let rawContent = await file(f).text();
+
+        // Optimization: add page break before each top-level chapter
+        if (depth === 0 && fullContent.length > 500) {
+            fullContent += `\n\n\\newpage\n\n`; 
+        }
+
+        if (depth > 0) {
+            const headerPrefix = "#".repeat(depth);
+            rawContent = rawContent.replace(/^(#+ )/gm, headerPrefix + "$1");
+        }
+
+        fullContent += `\n\n<!-- Source: ${relPath} -->\n\n`;
+        fullContent += rawContent;
+        fullContent += "\n";
+    }
+
+    const charCount = countContentChars(fullContent);
+
+    console.log(`✅ ${pkgId} merge complete:`);
+    console.log(`   - Files included: ${files.length}`);
+    console.log(`   - Total characters: ${charCount}`);
+
+    const outputPath = join(pkgPath, "../", `${pkgId}_Complete_Draft.md`);
+    await write(outputPath, fullContent);
+    return outputPath;
+}
+
+// ============ DOCX Conversion Functions ============
+
+
 /**
- * 预处理 Markdown: 移除与 pandoc 不兼容的内容，清理标题编号冲突
+ * Preprocess Markdown: Remove pandoc-incompatible content, clean heading numbering conflicts
  */
 function preprocessMarkdown(content: string): string {
-    // 移除 HTML 注释
+    // Remove HTML comments
     let processed = content.replace(/<!--.*?-->/gs, "");
 
-    // 移除 \newpage 并替换为 pandoc 分页符
+    // Remove \newpage (replaced by pandoc page breaks if needed)
     processed = processed.replace(/\\newpage/g, "");
 
-    // 移除标题中的手动编号，避免与 DOCX 模板自动编号冲突
-    // 匹配模式：
-    //   ## 2.1 标题    → ## 标题
-    //   ### 2.1.1 标题 → ### 标题
-    //   ## 1. 标题     → ## 标题
-    //   ### 3.2.1. 标题 → ### 标题
+    // Remove manual numbering in headings to avoid conflicts with DOCX template auto-numbering
+    // Match patterns:
+    //   ## 2.1 Heading    → ## Heading
+    //   ### 2.1.1 Heading → ### Heading
+    //   ## 1. Heading     → ## Heading
+    //   ### 3.2.1. Heading → ### Heading
     processed = processed.replace(
         /^(#{1,6})\s+\d+(?:\.\d+)*\.?\s+/gm,
         "$1 "
     );
 
-    // 处理连续空行（超过2个合并为2个）
+    // Handle consecutive blank lines (merge more than 2 into 2)
     processed = processed.replace(/\n{4,}/g, "\n\n\n");
 
     return processed;
 }
 
 /**
- * 使用 pandoc 将 Markdown 文件转换为 DOCX
+ * Convert Markdown file to DOCX using pandoc
  */
 async function convertMdToDocx(
     inputMd: string,
@@ -78,20 +192,20 @@ async function convertMdToDocx(
     } = options;
 
     if (!existsSync(TEMPLATE_PATH)) {
-        throw new Error(`模板文件不存在: ${TEMPLATE_PATH}`);
+        throw new Error(`Template file not found: ${TEMPLATE_PATH}`);
     }
 
     if (!existsSync(inputMd)) {
-        throw new Error(`输入文件不存在: ${inputMd}`);
+        throw new Error(`Input file not found: ${inputMd}`);
     }
 
-    // 预处理 Markdown
+    // Preprocess Markdown
     const rawContent = await Bun.file(inputMd).text();
     const processed = preprocessMarkdown(rawContent);
     const tmpInput = inputMd + ".tmp.md";
     await Bun.write(tmpInput, processed);
 
-    // 构建 pandoc 命令参数
+    // Build pandoc command arguments
     const args: string[] = [
         tmpInput,
         "-o", outputDocx,
@@ -110,8 +224,8 @@ async function convertMdToDocx(
         args.push("--number-sections");
     }
 
-    console.log(`📝 正在转换: ${basename(inputMd)} → ${basename(outputDocx)}`);
-    console.log(`   模板: ${basename(TEMPLATE_PATH)}`);
+    console.log(`📝 Converting: ${basename(inputMd)} → ${basename(outputDocx)}`);
+    console.log(`   Template: ${basename(TEMPLATE_PATH)}`);
 
     try {
         const proc = Bun.spawn(["pandoc", ...args], {
@@ -126,108 +240,167 @@ async function convertMdToDocx(
             throw new Error(`pandoc exit code ${exitCode}: ${stderr || stdout}`);
         }
         if (stderr.trim()) {
-            console.log(`   pandoc 警告: ${stderr.trim()}`);
+            console.log(`   pandoc warning: ${stderr.trim()}`);
         }
     } catch (err: any) {
         if (err.message?.startsWith("pandoc exit code")) throw err;
-        throw new Error(`pandoc 转换失败: ${err.message || err}`);
+        throw new Error(`pandoc conversion failed: ${err.message || err}`);
     } finally {
-        // 清理临时文件
+        // Cleanup temporary files
         try {
             await $`rm -f ${tmpInput}`.quiet();
         } catch {}
     }
 
     if (!existsSync(outputDocx)) {
-        throw new Error(`输出文件未生成: ${outputDocx}`);
+        throw new Error(`Output file not generated: ${outputDocx}`);
     }
 
     const stat = Bun.file(outputDocx);
-    console.log(`✅ 转换成功: ${outputDocx}`);
-    console.log(`   文件大小: ${(stat.size / 1024).toFixed(1)} KB`);
+    console.log(`✅ Conversion successful: ${outputDocx}`);
+    console.log(`   File size: ${(stat.size / 1024).toFixed(1)} KB`);
+}
+
+// ============ Workflow Functions ============
+
+/**
+ * Merge only - collect and merge Markdown files
+ */
+async function runMergeOnly(packagePath?: string): Promise<void> {
+    if (packagePath) {
+        // Custom single package
+        const pkgName = basename(packagePath);
+        const pkgId = pkgName;
+        const mergedPath = await mergePackage(packagePath, pkgName, pkgId);
+        console.log(`\n📄 Merged file: ${mergedPath}`);
+    } else {
+        // Default packages
+        for (const root of TARGET_ROOTS) {
+            try {
+                const mergedPath = await mergePackage(root.path, root.name, root.id);
+                console.log(`\n📄 Merged file: ${mergedPath}`);
+            } catch (e) {
+                console.error(`❌ Error merging ${root.name}:`, e);
+            }
+        }
+    }
 }
 
 /**
- * 转换单个 Markdown 文件
+ * Convert only - convert existing Markdown to DOCX
  */
-async function convertSingle(inputPath: string, outputPath?: string): Promise<void> {
+async function runConvertOnly(inputPath: string, outputPath?: string): Promise<void> {
     const input = resolve(inputPath);
     const output = outputPath
         ? resolve(outputPath)
         : input.replace(/\.md$/, ".docx");
 
-    await convertMdToDocx(input, output);
+    await convertMdToDocx(input, output, {
+        toc: true,
+        tocDepth: TOC_DEPTH,
+    });
 }
 
 /**
- * 合并并转换所有分包
+ * Full pipeline - merge and convert all packages
  */
-async function convertAll(): Promise<void> {
-    console.log("🚀 开始合并并转换所有分包...\n");
+async function runFullPipeline(): Promise<void> {
+    console.log("🚀 Starting full pipeline: merge + convert...\n");
 
     for (const root of TARGET_ROOTS) {
         try {
-            // 先合并 Markdown
+            // First merge Markdown
             const mergedMdPath = await mergePackage(root.path, root.name, root.id);
 
-            // 再转为 DOCX
+            // Then convert to DOCX
             const docxPath = mergedMdPath.replace(/\.md$/, ".docx");
             await convertMdToDocx(mergedMdPath, docxPath, {
                 toc: true,
                 tocDepth: TOC_DEPTH,
             });
 
-            console.log(`\n📦 ${root.name} 完成!`);
+            console.log(`\n📦 ${root.name} complete!`);
             console.log(`   MD:   ${mergedMdPath}`);
             console.log(`   DOCX: ${docxPath}\n`);
         } catch (e) {
-            console.error(`❌ 处理 ${root.name} 时出错:`, e);
+            console.error(`❌ Error processing ${root.name}:`, e);
         }
     }
 
-    console.log("\n🎉 全部转换完成!");
+    console.log("\n🎉 All conversions complete!");
 }
 
-// ============ CLI 入口 ============
+// ============ CLI Entry Point ============
 if (import.meta.main) {
     const args = process.argv.slice(2);
 
     if (args.length === 0) {
         console.log(`
-用法:
-  bun run md2docx.ts <input.md> [output.docx]    转换单个文件
-  bun run md2docx.ts --all                        合并并转换所有分包
+md2docx.ts - Unified Markdown to DOCX Workflow Tool
 
-模板样式说明 (来自 技术方案(4).docx):
-  # 标题       → Heading 1 (16pt 宋体加粗, 编号 1.)
-  ## 标题      → Heading 2 (15pt 宋体加粗, 编号 1.1.)
-  ### 标题     → Heading 3 (14pt 宋体加粗, 编号 1.1.1.)
-  #### 标题    → Heading 4 (12pt 宋体加粗, 编号 1.1.1.1.)
-  正文段落     → Body Text (12pt 宋体, 首行缩进2字符, 1.5倍行距)
-  > 引用       → Block Text (左侧灰色竖线)
-  \`\`\`代码\`\`\`    → Source Code (Consolas 10pt, 灰底)
-  | 表格 |     → Table Grid (全边框)
+Usage:
+  bun run md2docx.ts merge [--path <dir>]         Merge content.md files only
+  bun run md2docx.ts convert <input.md> [out]     Convert existing MD to DOCX
+  bun run md2docx.ts all                          Full pipeline (merge + convert)
+  bun run md2docx.ts <input.md> [output.docx]     Quick convert single file
 
-页面: A4, 上下 2.54cm, 左右 3.17cm
+Workflow Modes:
+  merge    - Collect and merge content.md files from directory structure
+  convert  - Convert already-merged Markdown to DOCX using pandoc
+  all      - Complete workflow: merge all packages then convert to DOCX
+
+Examples:
+  bun run md2docx.ts merge --path ./01_TechnicalProposal
+  bun run md2docx.ts convert Package1_Complete_Draft.md
+  bun run md2docx.ts all
+  bun run md2docx.ts my-document.md output.docx
+
+Configuration (via environment variables):
+  DOCX_TEMPLATE       Path to reference template (default: ../template.docx)
+  DOCX_TOC_DEPTH      Table of contents depth (default: 4)
+  DOCX_AUTHOR         Document author name
+  DOCX_PKG_PATH       Single package path
+  DOCX_PKG_NAME       Single package name
+  DOCX_PKG_ID         Single package ID
+  DOCX_CONFIG         Full JSON config for multiple packages
+
+Template Style Mapping:
+  # Heading       → Heading 1 (Top-level, numbered 1.)
+  ## Heading      → Heading 2 (Second-level, numbered 1.1.)
+  ### Heading     → Heading 3 (Third-level, numbered 1.1.1.)
+  #### Heading    → Heading 4 (Fourth-level, numbered 1.1.1.1.)
+  Paragraph       → Body Text (First-line indent, 1.5x line spacing)
+  > Quote         → Block Text (Left gray border)
+  \`\`\`code\`\`\`      → Source Code (Monospace, gray background)
+  | Table |       → Table Grid (Full borders)
+
+Page Settings: A4, top/bottom 2.54cm, left/right 3.17cm
 `);
         process.exit(1);
     }
 
-    if (args[0] === "--all") {
-        await convertAll();
-    } else if (args[0] === "--merge-run" && args.length >= 4) {
-        // 支持直接从路径合并并转换: bun run md2docx.ts --merge-run <path> <name> <id>
-        const pkgPath = args[1];
-        const pkgName = args[2];
-        const pkgId = args[3];
-        console.log(`🚀 开始处理分包: ${pkgName}`);
-        const mergedMdPath = await mergePackage(pkgPath, pkgName, pkgId);
-        const docxPath = mergedMdPath.replace(/\.md$/, ".docx");
-        await convertMdToDocx(mergedMdPath, docxPath, {
-            toc: true,
-            tocDepth: TOC_DEPTH,
-        });
-    } else {
-        await convertSingle(args[0], args[1]);
+    const command = args[0];
+
+    try {
+        if (command === "merge") {
+            // Check for --path flag
+            const pathIndex = args.indexOf("--path");
+            const customPath = pathIndex >= 0 && args[pathIndex + 1] ? args[pathIndex + 1] : undefined;
+            await runMergeOnly(customPath);
+        } else if (command === "convert" && args.length >= 2) {
+            await runConvertOnly(args[1], args[2]);
+        } else if (command === "all") {
+            await runFullPipeline();
+        } else if (!command.startsWith("--") && command.endsWith(".md")) {
+            // Quick convert mode: bun run md2docx.ts input.md [output.docx]
+            await runConvertOnly(command, args[1]);
+        } else {
+            console.error("Invalid arguments. Run without arguments to see usage.");
+            process.exit(1);
+        }
+    } catch (error) {
+        console.error("❌ Error:", error);
+        process.exit(1);
     }
 }
+

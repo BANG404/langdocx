@@ -18,5 +18,3 @@ print(f"页数: {page_count}")
 ```
 
 构建一个 check script 来验证生成的 docx 是否满足页数要求
-
-使用 
