@@ -18,7 +18,7 @@ import { join } from "path";
  *   bun run check_stats.ts [dir]                   # Analyze Markdown (default)
  */
 
-const WORDS_PER_PAGE = 800; // Adjust based on font size/line height
+// const WORDS_PER_PAGE = 800; // Removed per user request
 
 /**
  * Count characters in Markdown files recursively
@@ -89,11 +89,9 @@ async function analyzeMarkdown(dir: string): Promise<void> {
     console.log(`\n📊 Analyzing Markdown files in: ${dir}\n`);
     
     const { chars, files } = await countMarkdownChars(dir);
-    const estimatedPages = (chars / WORDS_PER_PAGE).toFixed(1);
     
     console.log(`Files analyzed:    ${files}`);
     console.log(`Total characters:  ${chars.toLocaleString()}`);
-    console.log(`Estimated pages:   ${estimatedPages} (at ${WORDS_PER_PAGE} chars/page)`);
 }
 
 /**
@@ -125,44 +123,6 @@ async function analyzeDocx(docxPath: string, targetPages?: number): Promise<bool
     return true;
 }
 
-/**
- * Compare Markdown estimate with DOCX actual
- */
-async function compareAll(mdDir: string, docxPath: string): Promise<void> {
-    console.log(`\n📊 Comprehensive Analysis\n`);
-    console.log(`Markdown source: ${mdDir}`);
-    console.log(`DOCX output:     ${docxPath}\n`);
-    
-    // Analyze Markdown
-    const { chars, files } = await countMarkdownChars(mdDir);
-    const estimatedPages = chars / WORDS_PER_PAGE;
-    
-    console.log(`--- Source Analysis ---`);
-    console.log(`Files:             ${files}`);
-    console.log(`Characters:        ${chars.toLocaleString()}`);
-    console.log(`Estimated pages:   ${estimatedPages.toFixed(1)}\n`);
-    
-    // Analyze DOCX
-    const actualPages = await getDocxPageCount(docxPath);
-    
-    console.log(`--- Output Analysis ---`);
-    console.log(`Actual pages:      ${actualPages}`);
-    
-    // Compare
-    const difference = actualPages - estimatedPages;
-    const accuracy = ((actualPages / estimatedPages) * 100).toFixed(1);
-    
-    console.log(`\n--- Comparison ---`);
-    console.log(`Estimation accuracy: ${accuracy}%`);
-    console.log(`Difference:          ${difference > 0 ? '+' : ''}${difference.toFixed(1)} pages`);
-    
-    if (Math.abs(difference) <= estimatedPages * 0.1) {
-        console.log(`✅ Estimation is accurate (within 10%)`);
-    } else {
-        console.log(`⚠️  Consider adjusting WORDS_PER_PAGE constant (current: ${WORDS_PER_PAGE})`);
-    }
-}
-
 // ============ CLI Entry Point ============
 if (import.meta.main) {
     const args = process.argv.slice(2);
@@ -170,15 +130,13 @@ if (import.meta.main) {
     if (args.length === 0) {
         console.log(`
 Usage:
-  bun run check_stats.ts --md <dir>               Analyze Markdown directory
+  bun run check_stats.ts --md <dir>               Analyze Markdown directory (stats only)
   bun run check_stats.ts --docx <file> [target]   Check DOCX page count
-  bun run check_stats.ts --all <dir> <docx>       Compare MD vs DOCX
   bun run check_stats.ts [dir]                    Analyze Markdown (default)
 
 Examples:
   bun run check_stats.ts ./01_TechnicalProposal
   bun run check_stats.ts --docx Package1_Complete_Draft.docx 50
-  bun run check_stats.ts --all ./01_TechnicalProposal Package1_Complete_Draft.docx
 `);
         process.exit(1);
     }
@@ -192,8 +150,6 @@ Examples:
             const target = args[2] ? parseInt(args[2]) : undefined;
             const success = await analyzeDocx(args[1], target);
             process.exit(success ? 0 : 1);
-        } else if (mode === "--all" && args.length >= 3) {
-            await compareAll(args[1], args[2]);
         } else if (!mode.startsWith("--")) {
             // Default: analyze markdown
             await analyzeMarkdown(mode);

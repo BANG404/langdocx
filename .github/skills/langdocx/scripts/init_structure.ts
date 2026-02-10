@@ -1,5 +1,6 @@
 
-import { mkdir, write } from "bun";
+import { mkdir } from "node:fs/promises";
+import { write } from "bun";
 import { join, dirname } from "path";
 
 /**

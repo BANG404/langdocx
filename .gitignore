@@ -1,1 +1,8 @@
-.github
+.github/instructions/*
+
+test
+node_modules
+changzhou_audit_p2
+
+
+UsageScenarios.md

@@ -37,30 +37,6 @@ import { join, dirname, basename, resolve, relative } from "path";
 import { existsSync } from "fs";
 import { readdir } from "node:fs/promises";
 
-const PROJECT_ROOT = dirname(import.meta.path);
-const TEMPLATE_PATH = process.env.DOCX_TEMPLATE || join(PROJECT_ROOT, "../template.docx");
-const TOC_DEPTH = parseInt(process.env.DOCX_TOC_DEPTH || "4");
-
-// ============ Configuration ============
-export let TARGET_ROOTS = [
-    {
-        id: process.env.DOCX_PKG_ID || "Package1",
-        name: process.env.DOCX_PKG_NAME || "Technical Proposal Package 1",
-        path: process.env.DOCX_PKG_PATH || "./01_TechnicalProposal"
-    }
-];
-
-// Override entire config via environment variable if needed
-if (process.env.DOCX_CONFIG) {
-    try {
-        TARGET_ROOTS = JSON.parse(process.env.DOCX_CONFIG);
-    } catch (e) {
-        console.warn("Failed to parse DOCX_CONFIG, using default configuration");
-    }
-}
-
-export const AUTHOR = process.env.DOCX_AUTHOR || "Author Name";
-
 // ============ Markdown Merging Functions ============
 
 async function getFiles(dir: string): Promise<string[]> {
@@ -97,17 +73,17 @@ export function countContentChars(text: string) {
         .length;
 }
 
-export async function mergePackage(pkgPath: string, pkgName: string, pkgId: string): Promise<string> {
-    console.log(`\n📦 Merging ${pkgName}...`);
+export async function mergePackage(pkgPath: string, pkgName: string, pkgId: string, author: string, tocTitle: string = "Table of Contents"): Promise<string> {
+    console.log(`\n[INFO] Merging ${pkgName}...`);
     const files = await getFiles(pkgPath);
     let fullContent = "";
 
     fullContent += `---\n`;
     fullContent += `title: "${pkgName}"\n`;
-    fullContent += `author: "${AUTHOR}"\n`;
+    fullContent += `author: "${author}"\n`;
     fullContent += `date: "${new Date().toLocaleDateString()}"\n`;
     fullContent += `toc: true\n`;
-    fullContent += `toc-title: "Table of Contents"\n`;
+    fullContent += `toc-title: "${tocTitle}"\n`;
     fullContent += `--- \n\n`;
 
     for (const f of files) {
@@ -134,7 +110,7 @@ export async function mergePackage(pkgPath: string, pkgName: string, pkgId: stri
 
     const charCount = countContentChars(fullContent);
 
-    console.log(`✅ ${pkgId} merge complete:`);
+    console.log(`[SUCCESS] ${pkgId} merge complete:`);
     console.log(`   - Files included: ${files.length}`);
     console.log(`   - Total characters: ${charCount}`);
 
@@ -179,6 +155,7 @@ function preprocessMarkdown(content: string): string {
 async function convertMdToDocx(
     inputMd: string,
     outputDocx: string,
+    templatePath: string,
     options: {
         toc?: boolean;
         tocDepth?: number;
@@ -191,8 +168,8 @@ async function convertMdToDocx(
         numberSections = false,
     } = options;
 
-    if (!existsSync(TEMPLATE_PATH)) {
-        throw new Error(`Template file not found: ${TEMPLATE_PATH}`);
+    if (!existsSync(templatePath)) {
+        throw new Error(`Template file not found: ${templatePath}`);
     }
 
     if (!existsSync(inputMd)) {
@@ -209,7 +186,7 @@ async function convertMdToDocx(
     const args: string[] = [
         tmpInput,
         "-o", outputDocx,
-        "--reference-doc", TEMPLATE_PATH,
+        "--reference-doc", templatePath,
         "--from", "markdown+yaml_metadata_block+pipe_tables+grid_tables+table_captions+fenced_code_blocks+backtick_code_blocks+fenced_divs+bracketed_spans",
         "--to", "docx",
         "--wrap=none",
@@ -224,8 +201,8 @@ async function convertMdToDocx(
         args.push("--number-sections");
     }
 
-    console.log(`📝 Converting: ${basename(inputMd)} → ${basename(outputDocx)}`);
-    console.log(`   Template: ${basename(TEMPLATE_PATH)}`);
+    console.log(`[CONVERT] Converting: ${basename(inputMd)} -> ${basename(outputDocx)}`);
+    console.log(`   Template: ${basename(templatePath)}`);
 
     try {
         const proc = Bun.spawn(["pandoc", ...args], {
@@ -257,7 +234,7 @@ async function convertMdToDocx(
     }
 
     const stat = Bun.file(outputDocx);
-    console.log(`✅ Conversion successful: ${outputDocx}`);
+    console.log(`[SUCCESS] Conversion successful: ${outputDocx}`);
     console.log(`   File size: ${(stat.size / 1024).toFixed(1)} KB`);
 }
 
@@ -266,21 +243,21 @@ async function convertMdToDocx(
 /**
  * Merge only - collect and merge Markdown files
  */
-async function runMergeOnly(packagePath?: string): Promise<void> {
+async function runMergeOnly(targetRoots: any[], author: string, tocTitle: string, packagePath?: string): Promise<void> {
     if (packagePath) {
         // Custom single package
         const pkgName = basename(packagePath);
         const pkgId = pkgName;
-        const mergedPath = await mergePackage(packagePath, pkgName, pkgId);
-        console.log(`\n📄 Merged file: ${mergedPath}`);
+        const mergedPath = await mergePackage(packagePath, pkgName, pkgId, author, tocTitle);
+        console.log(`\n[FILE] Merged file: ${mergedPath}`);
     } else {
         // Default packages
-        for (const root of TARGET_ROOTS) {
+        for (const root of targetRoots) {
             try {
-                const mergedPath = await mergePackage(root.path, root.name, root.id);
-                console.log(`\n📄 Merged file: ${mergedPath}`);
+                const mergedPath = await mergePackage(root.path, root.name, root.id, author, tocTitle);
+                console.log(`\n[FILE] Merged file: ${mergedPath}`);
             } catch (e) {
-                console.error(`❌ Error merging ${root.name}:`, e);
+                console.error(`[ERROR] Error merging ${root.name}:`, e);
             }
         }
     }
@@ -289,90 +266,159 @@ async function runMergeOnly(packagePath?: string): Promise<void> {
 /**
  * Convert only - convert existing Markdown to DOCX
  */
-async function runConvertOnly(inputPath: string, outputPath?: string): Promise<void> {
+async function runConvertOnly(inputPath: string, templatePath: string, tocDepth: number, outputPath?: string): Promise<void> {
     const input = resolve(inputPath);
     const output = outputPath
         ? resolve(outputPath)
         : input.replace(/\.md$/, ".docx");
 
-    await convertMdToDocx(input, output, {
+    await convertMdToDocx(input, output, templatePath, {
         toc: true,
-        tocDepth: TOC_DEPTH,
+        tocDepth: tocDepth,
     });
 }
 
 /**
  * Full pipeline - merge and convert all packages
  */
-async function runFullPipeline(): Promise<void> {
-    console.log("🚀 Starting full pipeline: merge + convert...\n");
+async function runFullPipeline(targetRoots: any[], author: string, templatePath: string, tocDepth: number, tocTitle: string): Promise<void> {
+    console.log("[START] Starting full pipeline: merge + convert...\n");
 
-    for (const root of TARGET_ROOTS) {
+    for (const root of targetRoots) {
         try {
             // First merge Markdown
-            const mergedMdPath = await mergePackage(root.path, root.name, root.id);
+            const mergedMdPath = await mergePackage(root.path, root.name, root.id, author, tocTitle);
 
             // Then convert to DOCX
             const docxPath = mergedMdPath.replace(/\.md$/, ".docx");
-            await convertMdToDocx(mergedMdPath, docxPath, {
+            await convertMdToDocx(mergedMdPath, docxPath, templatePath, {
                 toc: true,
-                tocDepth: TOC_DEPTH,
+                tocDepth: tocDepth,
             });
 
-            console.log(`\n📦 ${root.name} complete!`);
+            console.log(`\n[SUCCESS] ${root.name} complete!`);
             console.log(`   MD:   ${mergedMdPath}`);
             console.log(`   DOCX: ${docxPath}\n`);
         } catch (e) {
-            console.error(`❌ Error processing ${root.name}:`, e);
+            console.error(`[ERROR] Error processing ${root.name}:`, e);
         }
     }
 
-    console.log("\n🎉 All conversions complete!");
+    console.log("\n[FINISH] All conversions complete!");
+}
+
+// Helper to parse CLI arguments
+function parseCliArgs(args: string[]) {
+    const config: Record<string, string> = {};
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg.startsWith('--')) {
+            const key = arg.slice(2);
+            // Handle flags with values
+            if (i + 1 < args.length && !args[i + 1].startsWith('--')) {
+                config[key] = args[i + 1];
+                i++; // Skip next arg
+            } else {
+                config[key] = 'true';
+            }
+        }
+    }
+    return config;
 }
 
 // ============ CLI Entry Point ============
 if (import.meta.main) {
     const args = process.argv.slice(2);
+    const cliConfig = parseCliArgs(args);
 
-    if (args.length === 0) {
+    // Default settings (can be overridden by CLI args)
+    const author = cliConfig['author'] || "Author"; 
+    const tocDepth = parseInt(cliConfig['toc-depth'] || "4");
+    const tocTitle = cliConfig['toc-title'] || "Table of Contents";
+    
+    // Template priority: 1. CLI flag, 2. Default in skill root, 3. Workspace test dir
+    const projectRoot = dirname(import.meta.path);
+    const skillRootTemplate = resolve(projectRoot, "../../template.docx");
+    const workspaceTemplate = resolve(process.cwd(), "test/template.docx");
+    
+    let templatePath = cliConfig['template'] ? resolve(cliConfig['template']) : "";
+    
+    if (!templatePath) {
+        if (existsSync(workspaceTemplate)) {
+            templatePath = workspaceTemplate;
+        } else if (existsSync(skillRootTemplate)) {
+            templatePath = skillRootTemplate;
+        } else {
+            templatePath = skillRootTemplate; // Fallback to expected path even if missing for error report
+        }
+    }
+
+    let targetRoots: any[] = [];
+
+    // Parse package targetRoots from CLI
+    if (cliConfig['pkg-root'] || cliConfig['name'] || cliConfig['id']) {
+        const pkgRoot = cliConfig['pkg-root'] || ".";
+        const pkgName = cliConfig['name'] || basename(resolve(pkgRoot));
+        const pkgId = cliConfig['id'] || pkgName;
+        
+        targetRoots = [{
+            id: pkgId,
+            name: pkgName,
+            path: pkgRoot
+        }];
+    }
+    // Allow overriding via JSON config flag
+    else if (cliConfig['config']) {
+        try {
+            targetRoots = JSON.parse(cliConfig['config']);
+        } catch (e) {
+            console.warn("Failed to parse --config JSON");
+        }
+    } else {
+        // Fallback or empty
+        targetRoots = [];
+    }
+
+    if (args.length === 0 || (targetRoots.length === 0 && (args[0] === "all" || args[0] === "merge"))) {
         console.log(`
 md2docx.ts - Unified Markdown to DOCX Workflow Tool
 
 Usage:
-  bun run md2docx.ts merge [--path <dir>]         Merge content.md files only
+  bun run md2docx.ts all   --pkg-root <dir>       Full pipeline (merge + convert)
+  bun run md2docx.ts merge --pkg-root <dir>       Merge content.md files only
   bun run md2docx.ts convert <input.md> [out]     Convert existing MD to DOCX
-  bun run md2docx.ts all                          Full pipeline (merge + convert)
   bun run md2docx.ts <input.md> [output.docx]     Quick convert single file
 
+Options:
+  --pkg-root <dir>   Package root directory (source for merging)
+  --name <name>      Package name (used in document title)
+  --id <id>          Package ID (used in output filename)
+  --author <name>    Author name [default: Author]
+  --template <path>  Custom DOCX template path
+  --toc-depth <num>  TOC depth (1-6) [default: 4]
+  --toc-title <str>  TOC title [default: Table of Contents]
+  --config <json>    JSON configuration for multiple packages: '[{"id":"p1","name":"Pkg1","path":"./dir"}]'
+
 Workflow Modes:
+  all      - Complete workflow: merge all packages in targetRoots then convert to DOCX
   merge    - Collect and merge content.md files from directory structure
   convert  - Convert already-merged Markdown to DOCX using pandoc
-  all      - Complete workflow: merge all packages then convert to DOCX
 
 Examples:
-  bun run md2docx.ts merge --path ./01_TechnicalProposal
-  bun run md2docx.ts convert Package1_Complete_Draft.md
-  bun run md2docx.ts all
-  bun run md2docx.ts my-document.md output.docx
-
-Configuration (via environment variables):
-  DOCX_TEMPLATE       Path to reference template (default: ../template.docx)
-  DOCX_TOC_DEPTH      Table of contents depth (default: 4)
-  DOCX_AUTHOR         Document author name
-  DOCX_PKG_PATH       Single package path
-  DOCX_PKG_NAME       Single package name
-  DOCX_PKG_ID         Single package ID
-  DOCX_CONFIG         Full JSON config for multiple packages
+  bun run md2docx.ts all --pkg-root ./my-docs --name "Project Plan"
+  bun run md2docx.ts merge --pkg-root ./src --id "FullDraft"
+  bun run md2docx.ts convert Draft.md --template custom.docx
+  bun run md2docx.ts report.md final.docx
 
 Template Style Mapping:
-  # Heading       → Heading 1 (Top-level, numbered 1.)
-  ## Heading      → Heading 2 (Second-level, numbered 1.1.)
-  ### Heading     → Heading 3 (Third-level, numbered 1.1.1.)
-  #### Heading    → Heading 4 (Fourth-level, numbered 1.1.1.1.)
-  Paragraph       → Body Text (First-line indent, 1.5x line spacing)
-  > Quote         → Block Text (Left gray border)
-  \`\`\`code\`\`\`      → Source Code (Monospace, gray background)
-  | Table |       → Table Grid (Full borders)
+  # Heading       -> Heading 1 (Top-level, numbered 1.)
+  ## Heading      -> Heading 2 (Second-level, numbered 1.1.)
+  ### Heading     -> Heading 3 (Third-level, numbered 1.1.1.)
+  #### Heading    -> Heading 4 (Fourth-level, numbered 1.1.1.1.)
+  Paragraph       -> Body Text (First-line indent, 1.5x line spacing)
+  > Quote         -> Block Text (Left gray border)
+  \`\`\`code\`\`\`      -> Source Code (Monospace, gray background)
+  | Table |       -> Table Grid (Full borders)
 
 Page Settings: A4, top/bottom 2.54cm, left/right 3.17cm
 `);
@@ -383,24 +429,31 @@ Page Settings: A4, top/bottom 2.54cm, left/right 3.17cm
 
     try {
         if (command === "merge") {
-            // Check for --path flag
+            // Check for --pkg-root flag (preferred) or legacy --path
             const pathIndex = args.indexOf("--path");
-            const customPath = pathIndex >= 0 && args[pathIndex + 1] ? args[pathIndex + 1] : undefined;
-            await runMergeOnly(customPath);
+            const pkgRootIndex = args.indexOf("--pkg-root");
+            
+            let customPath = undefined;
+            if (pkgRootIndex >= 0 && args[pkgRootIndex + 1]) {
+                customPath = args[pkgRootIndex + 1];
+            } else if (pathIndex >= 0 && args[pathIndex + 1]) {
+                customPath = args[pathIndex + 1];
+            }
+            
+            await runMergeOnly(targetRoots, author, tocTitle, customPath);
         } else if (command === "convert" && args.length >= 2) {
-            await runConvertOnly(args[1], args[2]);
+            await runConvertOnly(args[1], templatePath, tocDepth, args[2]);
         } else if (command === "all") {
-            await runFullPipeline();
+            await runFullPipeline(targetRoots, author, templatePath, tocDepth, tocTitle);
         } else if (!command.startsWith("--") && command.endsWith(".md")) {
             // Quick convert mode: bun run md2docx.ts input.md [output.docx]
-            await runConvertOnly(command, args[1]);
+            await runConvertOnly(command, templatePath, tocDepth, args[1]);
         } else {
             console.error("Invalid arguments. Run without arguments to see usage.");
             process.exit(1);
         }
     } catch (error) {
-        console.error("❌ Error:", error);
+        console.error("[ERROR] Error:", error);
         process.exit(1);
     }
 }
-
