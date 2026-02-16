@@ -86,22 +86,49 @@ export async function mergePackage(pkgPath: string, pkgName: string, pkgId: stri
     fullContent += `toc-title: "${tocTitle}"\n`;
     fullContent += `--- \n\n`;
 
+    // Title is already in YAML frontmatter, no need for duplicate H1 heading
+
     for (const f of files) {
         const relPath = relative(pkgPath, f);
-        // Directory depth: 01_Overview/content.md → depth 0 (chapter level, H1 unchanged)
-        //                  01_Overview/01_Section/content.md → depth 1 (# becomes ##)
-        const depth = Math.max(0, relPath.split("/").length - 2);
+        // Correct depth: 
+        // 01_Overview/content.md -> depth 0
+        // 01_Overview/01_Section/content.md -> depth 1
+        const pathParts = relPath.split("/");
+        const depth = Math.max(0, pathParts.length - 2);
+        
+        // Auto-generate heading from folder name
+        const rawFolderName = pathParts[pathParts.length - 2];
+        // Strip ALL numeric prefixes to avoid conflicts with Word's auto-numbering
+        // Handles formats: "01_Title", "1. Title", "1）Title", "(01)Title", "【1】Title", etc.
+        // This ensures Word template's numbering style is the ONLY source of numbering
+        let cleanFolderName = rawFolderName
+            .replace(/^[\(（【]?\d+[\)）】]?[\s._\-]*/, "") // Remove: 01_, 1., 1）, (01), 【1】, etc.
+            .replace(/^第[0-9零一二三四五六七八九十百千]+[章节部分篇][\s._\-]*/, "") // Remove: 第一章, 第二节, etc.
+            .replace(/_/g, " ") // Convert underscores to spaces
+            .trim();
+        
+        // Safety check: if cleaning removed everything, use original
+        if (!cleanFolderName) {
+            cleanFolderName = rawFolderName.replace(/_/g, " ").trim();
+        }
+        
+        // Match heading level to depth + 1 (no document title, top chapters are H1)
+        const headingLevel = depth + 1;
+        const headingPrefix = "#".repeat(headingLevel);
+        
         let rawContent = await file(f).text();
+        
+        // PREPROCESS content.md: Remove local headers to prevent folder-vs-file title conflicts
+        // This ensures the folder structure is the ONLY source of headers.
+        rawContent = rawContent.replace(/^#{1,6}\s+.*\n?/gm, "");
 
         // Optimization: add page break before each top-level chapter
         if (depth === 0 && fullContent.length > 500) {
             fullContent += `\n\n\\newpage\n\n`; 
         }
 
-        if (depth > 0) {
-            const headerPrefix = "#".repeat(depth);
-            rawContent = rawContent.replace(/^(#+ )/gm, headerPrefix + "$1");
-        }
+        // Add the auto-generated heading
+        fullContent += `\n\n${headingPrefix} ${cleanFolderName}\n\n`;
 
         fullContent += `\n\n<!-- Source: ${relPath} -->\n\n`;
         fullContent += rawContent;
@@ -126,24 +153,13 @@ export async function mergePackage(pkgPath: string, pkgName: string, pkgId: stri
  * Preprocess Markdown: Remove pandoc-incompatible content, clean heading numbering conflicts
  */
 function preprocessMarkdown(content: string): string {
-    // Remove HTML comments
+    // 1. Remove HTML comments
     let processed = content.replace(/<!--.*?-->/gs, "");
 
-    // Remove \newpage (replaced by pandoc page breaks if needed)
+    // 2. Remove \newpage (replaced by pandoc page breaks if needed)
     processed = processed.replace(/\\newpage/g, "");
 
-    // Remove manual numbering in headings to avoid conflicts with DOCX template auto-numbering
-    // Match patterns:
-    //   ## 2.1 Heading    → ## Heading
-    //   ### 2.1.1 Heading → ### Heading
-    //   ## 1. Heading     → ## Heading
-    //   ### 3.2.1. Heading → ### Heading
-    processed = processed.replace(
-        /^(#{1,6})\s+\d+(?:\.\d+)*\.?\s+/gm,
-        "$1 "
-    );
-
-    // Handle consecutive blank lines (merge more than 2 into 2)
+    // 4. Handle consecutive blank lines (merge more than 2 into 2)
     processed = processed.replace(/\n{4,}/g, "\n\n\n");
 
     return processed;
@@ -294,6 +310,7 @@ async function runFullPipeline(targetRoots: any[], author: string, templatePath:
             await convertMdToDocx(mergedMdPath, docxPath, templatePath, {
                 toc: true,
                 tocDepth: tocDepth,
+                numberSections: true, // Enable Pandoc numbering to apply template's numbering styles
             });
 
             console.log(`\n[SUCCESS] ${root.name} complete!`);
@@ -336,15 +353,19 @@ if (import.meta.main) {
     const tocDepth = parseInt(cliConfig['toc-depth'] || "4");
     const tocTitle = cliConfig['toc-title'] || "Table of Contents";
     
-    // Template priority: 1. CLI flag, 2. Default in skill root, 3. Workspace test dir
+    // Template priority: 1. CLI flag, 2. Numbering template (NEW), 3. Default in skill root, 4. Workspace test dir
     const projectRoot = dirname(import.meta.path);
-    const skillRootTemplate = resolve(projectRoot, "../../template.docx");
+    const skillRootTemplate = resolve(projectRoot, "../assets/template.docx");
+    const skillRootNumberingTemplate = resolve(projectRoot, "../assets/template_with_numbering.docx");
     const workspaceTemplate = resolve(process.cwd(), "test/template.docx");
     
     let templatePath = cliConfig['template'] ? resolve(cliConfig['template']) : "";
     
     if (!templatePath) {
-        if (existsSync(workspaceTemplate)) {
+        // Prioritize numbering template for automatic heading numbering
+        if (existsSync(skillRootNumberingTemplate)) {
+            templatePath = skillRootNumberingTemplate;
+        } else if (existsSync(workspaceTemplate)) {
             templatePath = workspaceTemplate;
         } else if (existsSync(skillRootTemplate)) {
             templatePath = skillRootTemplate;
@@ -379,7 +400,7 @@ if (import.meta.main) {
         targetRoots = [];
     }
 
-    if (args.length === 0 || (targetRoots.length === 0 && (args[0] === "all" || args[0] === "merge"))) {
+    if (args.length === 0 || args[0] === "--help" || (targetRoots.length === 0 && (args[0] === "all" || args[0] === "merge"))) {
         console.log(`
 md2docx.ts - Unified Markdown to DOCX Workflow Tool
 

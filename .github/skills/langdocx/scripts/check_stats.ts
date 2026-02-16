@@ -21,11 +21,12 @@ import { join } from "path";
 // const WORDS_PER_PAGE = 800; // Removed per user request
 
 /**
- * Count characters in Markdown files recursively
+ * Count characters in Markdown files recursively and detect placeholders
  */
-async function countMarkdownChars(dir: string): Promise<{ chars: number; files: number }> {
+async function countMarkdownChars(dir: string): Promise<{ chars: number; files: number; placeholders: string[] }> {
     let totalChars = 0;
     let totalFiles = 0;
+    let placeholders: string[] = [];
     
     try {
         const entries = await readdir(dir, { withFileTypes: true });
@@ -36,8 +37,15 @@ async function countMarkdownChars(dir: string): Promise<{ chars: number; files: 
                 const result = await countMarkdownChars(fullPath);
                 totalChars += result.chars;
                 totalFiles += result.files;
+                placeholders.push(...result.placeholders);
             } else if (entry.isFile() && entry.name.endsWith(".md")) {
                 const content = await Bun.file(fullPath).text();
+                
+                // Check for placeholder
+                if (content.includes("<!-- content placeholder -->")) {
+                    placeholders.push(fullPath);
+                }
+
                 // Remove code blocks, html tags, comments, whitespace for rough char count
                 const clean = content
                     .replace(/```[\s\S]*?```/g, "")
@@ -52,7 +60,7 @@ async function countMarkdownChars(dir: string): Promise<{ chars: number; files: 
         console.error(`Error reading directory ${dir}:`, e);
     }
     
-    return { chars: totalChars, files: totalFiles };
+    return { chars: totalChars, files: totalFiles, placeholders };
 }
 
 /**
@@ -88,10 +96,18 @@ async function getDocxPageCount(docxPath: string): Promise<number> {
 async function analyzeMarkdown(dir: string): Promise<void> {
     console.log(`\n📊 Analyzing Markdown files in: ${dir}\n`);
     
-    const { chars, files } = await countMarkdownChars(dir);
+    const { chars, files, placeholders } = await countMarkdownChars(dir);
     
     console.log(`Files analyzed:    ${files}`);
     console.log(`Total characters:  ${chars.toLocaleString()}`);
+
+    if (placeholders.length > 0) {
+        console.log(`\n⚠️  Found ${placeholders.length} files with placeholders:`);
+        placeholders.forEach(p => console.log(`   - ${p}`));
+        console.log(`\n❌ Warning: Document is incomplete.`);
+    } else {
+        console.log(`\n✅ No placeholders found. Content complete!`);
+    }
 }
 
 /**
@@ -127,7 +143,7 @@ async function analyzeDocx(docxPath: string, targetPages?: number): Promise<bool
 if (import.meta.main) {
     const args = process.argv.slice(2);
     
-    if (args.length === 0) {
+    if (args.length === 0 || args[0] === "--help") {
         console.log(`
 Usage:
   bun run check_stats.ts --md <dir>               Analyze Markdown directory (stats only)
