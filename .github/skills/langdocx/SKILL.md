@@ -29,11 +29,12 @@ Use this workflow when the user asks to "write a 100-page solution" or "expand t
     
 2.  **Initialize Structure**:
     *   Create a file `structure.json` defining the hierarchy.
+    *   **Naming rule**: Use semantic names **without** sorting prefixes in `structure.json` (e.g., `Project_Overview`, `Technical_Framework`, not `01_Project_Overview`).
     *   Run: `bun run scripts/init_structure.ts structure.json <target_dir>`
-    *   *Result*: A nested folder tree (e.g., `Project_Background/Industry_Trends/content.md`).
+    *   *Result*: The script auto-generates prefixed folders (e.g., `01_Project_Background/01_Industry_Trends/content.md`).
 
 3.  **Draft & Fill Placeholders**:
-    *   **Folder-Driven Content**: Use folder names as titles. Use descriptive names directly. Folder order is determined by file system or alphabetical sorting.
+    *   **Folder-Driven Content**: Use folder names as titles. Keep semantic names in planning files, and rely on `init_structure.ts` to add sortable prefixes on disk.
     *   **Strict Purity**: `content.md` should contain **absolutely no `#` headers**. All structure is driven 100% by the folder hierarchy.
     *   Replace **all** `<!-- content placeholder -->` in the generated `content.md` files with detailed technical descriptions.
     *   **Writing Style (Human-Centric)**: strictly avoid fragmented bullet points or summarized lists. Use full paragraphs with logical transitions and descriptive language. Avoid repetitive transition words like "Finally" or "Furthermore".
@@ -41,6 +42,7 @@ Use this workflow when the user asks to "write a 100-page solution" or "expand t
 
 4.  **Merge, Build & Validate**:
     *   Build the document: `bun run scripts/md2docx.ts all --pkg-root <dir> --name "Project Name" --author "Your Name"`
+    *   **Prefix normalization**: `md2docx.ts` keeps prefixed folders for deterministic traversal order, then automatically removes those prefixes from final headings.
     *   **Final Verification**: Run `bun run scripts/check_stats.ts --docx output.docx <target_pages>` to verify if the output meets the page count requirement.
     *   **Constraint Loop**: If the document is too short or lacks detail, identify thin chapters, expand their `content.md`, and rebuild until validation passes.
 
@@ -98,13 +100,13 @@ Use this workflow when the user asks to "write a 100-page solution" or "expand t
 
 ### `scripts/init_structure.ts`
 Scaffolds the project folder.
-- **Input**: `structure.json` (Recursive node array)
-- **Output**: Directories and `content.md` files.
+- **Input**: `structure.json` (Recursive node array, names without numeric prefixes)
+- **Output**: Prefixed directories (`01_`, `02_`, ...) and `content.md` files.
 
 ### `scripts/md2docx.ts` ⭐ UNIFIED WORKFLOW TOOL
 Complete Markdown to DOCX pipeline.
 - **Modes**: `all`, `merge`, `convert`.
-- **Features**: Dynamic configuration, smart merging, and hierarchical file collection.
+- **Features**: Dynamic configuration, smart merging, hierarchical file collection, and heading prefix cleanup on merge.
 - **Dependency**: Requires `pandoc` and a reference document via `--template`.
 
 ### `scripts/check_stats.ts` ⭐ UNIFIED ANALYSIS TOOL

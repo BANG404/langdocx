@@ -12,13 +12,17 @@ import { join, dirname } from "path";
  * structure.json format example:
  * [
  *   {
- *     "name": "01_Introduction",
- *     "content": "# Introduction\n\nOverview of the project...",
+ *     "name": "Introduction",
+ *     "content": "Overview of the project...",
  *     "children": [
- *       { "name": "01_Background", "content": "## Background..." }
+ *       { "name": "Background", "content": "Overview of context..." }
  *     ]
  *   }
  * ]
+ * 
+ * Naming rule:
+ * - structure.json should use semantic names WITHOUT sorting prefixes.
+ * - This script automatically creates prefixed folders (01_, 02_, ...).
  */
 
 interface Node {
@@ -27,9 +31,23 @@ interface Node {
     children?: Node[];
 }
 
+function stripSortPrefix(name: string): string {
+    return name
+        .replace(/^[\(（【]?\d+[\)）】]?[\s._\-]*/, "")
+        .trim();
+}
+
+function formatNodeFolderName(rawName: string, index: number): string {
+    const cleanName = stripSortPrefix(rawName) || rawName.trim();
+    const prefix = String(index + 1).padStart(2, "0");
+    return `${prefix}_${cleanName}`;
+}
+
 async function createStructure(nodes: Node[], parentPath: string) {
-    for (const node of nodes) {
-        const currentPath = join(parentPath, node.name);
+    for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        const folderName = formatNodeFolderName(node.name, i);
+        const currentPath = join(parentPath, folderName);
         
         // Create directory
         await mkdir(currentPath, { recursive: true });

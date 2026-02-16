@@ -8,6 +8,9 @@
  * - Merge multiple content.md files from directory structure
  * - Convert Markdown to DOCX using pandoc with reference template
  * - Flexible workflow: merge-only, convert-only, or full pipeline
+ * - Prefix lifecycle: structure.json uses semantic names (no numeric prefix),
+ *   init_structure adds sortable prefixes to folders (01_, 02_, ...),
+ *   and merge removes prefixes from final headings.
  * 
  * Style mapping (from reference template):
  *   - Heading 1: Top-level heading with numbering (e.g., 1.)
@@ -99,11 +102,10 @@ export async function mergePackage(pkgPath: string, pkgName: string, pkgId: stri
         // Auto-generate heading from folder name
         const rawFolderName = pathParts[pathParts.length - 2];
         // Strip ALL numeric prefixes to avoid conflicts with Word's auto-numbering
-        // Handles formats: "01_Title", "1. Title", "1）Title", "(01)Title", "【1】Title", etc.
+        // Handles formats: "01_Title", "1. Title", "1) Title", "(01)Title", "[1]Title", etc.
         // This ensures Word template's numbering style is the ONLY source of numbering
         let cleanFolderName = rawFolderName
-            .replace(/^[\(（【]?\d+[\)）】]?[\s._\-]*/, "") // Remove: 01_, 1., 1）, (01), 【1】, etc.
-            .replace(/^第[0-9零一二三四五六七八九十百千]+[章节部分篇][\s._\-]*/, "") // Remove: 第一章, 第二节, etc.
+            .replace(/^[\(（【]?\d+[\)）】]?[\s._\-]*/, "") // Remove common numbering prefixes
             .replace(/_/g, " ") // Convert underscores to spaces
             .trim();
         
