@@ -14,7 +14,6 @@ import { join } from "path";
  * Usage:
  *   bun run check_stats.ts --md <dir>              # Analyze Markdown directory
  *   bun run check_stats.ts --docx <file> [target]  # Check DOCX page count
- *   bun run check_stats.ts --all <dir> <docx>      # Compare MD estimate vs DOCX actual
  *   bun run check_stats.ts [dir]                   # Analyze Markdown (default)
  */
 

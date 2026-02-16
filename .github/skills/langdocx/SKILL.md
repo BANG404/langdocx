@@ -1,22 +1,27 @@
 ---
 name: langdocx
 description: Specialist skill for authoring long-form technical proposals (50-200 pages) and performing high-fidelity document format cloning. Features automated directory structure generation, multi-file merging, and semantic style extraction from reference DOCX files.
-license: MIT
+license: Apache-2.0
+compatibility: "Run with Bun. Requires Pandoc."
 metadata:
-  version: "2.0"
-  author: "Copilot"
-  compatibility: "Run with Bun. Requires Pandoc."
+  version: "2.1"
+  author: "IUMM"
 ---
 
 # langdocx
 
 This skill transforms the workspace into a professional **Technical Document Factory**. It provides a structured workflow for generating massive PDF/DOCX deliverables and "cloning" the visual style of arbitrary reference documents (like government standards or corporate templates).
 
+## Best Practices & Agent Strategies
+
+*   **Subagent Concurrency**: When generating large-scale content (e.g., 100+ pages), use subagents to draft multiple `content.md` files in parallel to maximize throughput and maintain consistent detail across chapters.
+*   **Progressive Drafting**: Start with a detailed `structure.json`, then initialize the folders, and systematically fill the sections.
+*   **Pathing**: Always run scripts relative to the skill root if possible, or use the full path provided in the examples.
+
 ## Key Patterns
 
 ### Scenario 1: Authoring Long Technical Documents
 Use this workflow when the user asks to "write a 100-page solution" or "expand this into a full technical proposal".
-撰写文档的时候，优先考虑 使用 subagent 做并发
 
 1.  **Analyze & Design**:
     *   Review requirements.
@@ -24,128 +29,86 @@ Use this workflow when the user asks to "write a 100-page solution" or "expand t
     
 2.  **Initialize Structure**:
     *   Create a file `structure.json` defining the hierarchy.
-    *   Run: `bun run langdocx/scripts/init_structure.ts structure.json <target_dir>`
-    *   *Result*: A nested folder tree (e.g., `项目背景/行业趋势分析/content.md`).
+    *   Run: `bun run scripts/init_structure.ts structure.json <target_dir>`
+    *   *Result*: A nested folder tree (e.g., `Project_Background/Industry_Trends/content.md`).
 
 3.  **Draft & Fill Placeholders**:
-    *   **Folder-Driven Content**: Use folder names as titles. **CRITICAL**: Do NOT use numeric prefixes (e.g., `01_Overview`, `1_`, `2.`) in folder names. Use descriptive names directly (e.g., `项目背景`, `系统架构`, `Implementation Plan`). Folder order is determined by file system or alphabetical sorting.
-    *   **Strict Purity**: `content.md` should contain **absolutely no `#` headers**. All structure is driven 100% by the folder hierarchy. **Note**: Any line starting with `#` in `content.md` will be **automatically deleted** during processing to ensure folders remain the single source of truth for the document structure.
+    *   **Folder-Driven Content**: Use folder names as titles. Use descriptive names directly. Folder order is determined by file system or alphabetical sorting.
+    *   **Strict Purity**: `content.md` should contain **absolutely no `#` headers**. All structure is driven 100% by the folder hierarchy.
     *   Replace **all** `<!-- content placeholder -->` in the generated `content.md` files with detailed technical descriptions.
-    *   **Writing Style (Human-Centric)**: When drafting content, **strictly avoid fragmented bullet points or summarized lists**. Use full paragraphs with logical transitions and descriptive language. This ensures the document feels human-written and professional rather than AI-summarized.避免使用过多的连接词，比如最后，此外等。
-    *   Use `bun run check_stats.ts --md <target_dir>` frequently to monitor the estimated character and page counts during drafting.
+    *   **Writing Style (Human-Centric)**: strictly avoid fragmented bullet points or summarized lists. Use full paragraphs with logical transitions and descriptive language. Avoid repetitive transition words like "Finally" or "Furthermore".
+    *   Use `bun run scripts/check_stats.ts --md <target_dir>` frequently to monitor the estimated character and page counts during drafting.
 
 4.  **Merge, Build & Validate**:
-    *   Build the document: `bun run md2docx.ts all --pkg-root <dir> --name "Project Name" --author "Your Name"`
-    *   **Final Verification**: Run `bun run check_stats.ts --docx output.docx <target_pages>` to verify if the output meets the page count requirement.
-    *   **Constraint Loop**: If the document is too short or lacks detail, identify thin chapters, expand their `content.md`, and rebuild until the `check_stats.ts` validation passes.
+    *   Build the document: `bun run scripts/md2docx.ts all --pkg-root <dir> --name "Project Name" --author "Your Name"`
+    *   **Final Verification**: Run `bun run scripts/check_stats.ts --docx output.docx <target_pages>` to verify if the output meets the page count requirement.
+    *   **Constraint Loop**: If the document is too short or lacks detail, identify thin chapters, expand their `content.md`, and rebuild until validation passes.
 
 ### Scenario 2: Style Cloning & Format Replacement (In-Place Normalization)
 **Trigger**: When user asks to "transfer styles", "clone format", or "make it look like [Reference File]".
 **Goal**: Create a high-fidelity clone that preserves headers/footers (Protocol B) rather than just applying fonts (Protocol A).
 
-在 First Paragraph 没有的情况下样式应该和 正文一致
-
 **Process Algorithm**:
 
-1.  **前期准备**:
-    *   确保安装了解压工具（`unzip` 或使用 AdmZip 等）
-    *   准备好参考 DOCX 文件（如政府标准模板、企业格式规范文档等）
-    *   了解 Pandoc 标准样式映射要求（见下方列表）
+1.  **Preparation**:
+    *   Ensure extraction tools are installed (`unzip`).
+    *   Prepare a reference DOCX file (e.g., government standards or corporate guidelines).
+    *   Review Pandoc standard style mapping requirements (see list below).
 
-2.  **Unzip 解压模板**:
-    *   将参考 DOCX 文件解压到工作目录:
+2.  **Unzip Reference**:
+    *   Extract the reference DOCX:
         ```bash
         unzip Reference.docx -d Reference_Extracted/
         ```
-    *   解压后得到标准 Office Open XML 目录结构:
+    *   Structure:
         ```
         Reference_Extracted/
         ├── [Content_Types].xml
-        ├── _rels/
-        ├── docProps/
-        └── word/
-            ├── document.xml      ← 文档内容和段落样式引用
-            ├── styles.xml        ← 样式定义库
-            ├── numbering.xml     ← 编号定义
+        ├── word/
+            ├── document.xml      ← Content and paragraph style references
+            ├── styles.xml        ← Style definitions
             └── ...
         ```
 
-3.  **脚本化样式逆向与重构 (Scripted Style Refactor)**:
-    *   **核心理念**: 放弃手动编辑巨大的 XML 文件。Agent 应当参考 `xml.etree.ElementTree` 的处理模式，编写专门的 Python 脚本来操作 `word/styles.xml`。
-    *   **设计目的**: 自动化地将模板中的样式 ID 和名称统一标准化为 Pandoc 兼容集（如 `Heading1`-`Heading6`, `BodyText`, `FirstParagraph`），同时精准继承原始模板的视觉属性（字号、缩进、行间距、中西文字体）。
-    *   **实现提醒**: 脚本应具备清理冲突样式、定义缺失标准样式以及处理 `word/numbering.xml` 关联的能力。在执行任务时，Agent 应优先根据当前参考文件的 `document.xml` 使用习惯，**即时构建并运行**一个定制化的标准化脚本。
+3.  **Scripted Style Refactor**:
+    *   **Core Concept**: Avoid manual XML editing. Use Python with `xml.etree.ElementTree` to manipulate `word/styles.xml`.
+    *   **Objective**: Standardize style IDs and names to Pandoc-compatible sets (e.g., `Heading1`-`Heading6`, `BodyText`, `FirstParagraph`) while preserving original visual attributes (font size, indentation, spacing).
+    *   **Implementation**: Create a custom normalization script based on the specific `document.xml` of the reference file. The `FirstParagraph` style should match `BodyText` if no specific first-paragraph style exists.
 
-4.  **验证并重新打包**:
-    *   **验证样式完整性**:
-        *   检查 `styles.xml` 中是否包含所有 Pandoc 标准样式
-        *   确认每个样式的 `w:styleId` 和 `w:name` 都正确
-    *   **重新打包为 DOCX**
-    *   **端到端测试**:
-        *   使用 `md2docx.ts` 进行转换测试，检查生成的 DOCX 是否完美继承了原模板的页眉页脚、标题样式和编号习惯。
-    *   **Outcome**: A template that looks identical to the original (same headers/footers) but responds correctly to Pandoc's standard `# Heading 1` output.
+4.  **Validate & Pack**:
+    *   **Verify Style Integrity**: Ensure `styles.xml` contains all Pandoc standard styles with correct `w:styleId` and `w:name`.
+    *   **Repackage to DOCX**.
+    *   **Testing**: Run `scripts/md2docx.ts` to verify the generated document correctly inherits headers, footers, and styles.
 
-**Pandoc 标准样式映射参考**:
-| Pandoc 样式 ID | 样式名称 | 用途 | Markdown 对应 |
+**Pandoc Standard Style Mapping**:
+| Pandoc Style ID | Style Name | Usage | Markdown Equivalent |
 |---------------|---------|------|--------------|
-| `Heading1` | Heading 1 | 一级标题 | `# Title` |
-| `Heading2` | Heading 2 | 二级标题 | `## Title` |
-| `Heading3` | Heading 3 | 三级标题 | `### Title` |
-| `Heading4` | Heading 4 | 四级标题 | `#### Title` |
-| `Heading5` | Heading 5 | 五级标题 | `##### Title` |
-| `Heading6` | Heading 6 | 六级标题 | `###### Title` |
-| `BodyText` | Body Text | 正文段落 | `Paragraph` |
-| `FirstParagraph` | First Paragraph | 标题后首段 | (自动) |
-| `BlockText` | Block Text | 引用块 | `> Quote` |
-| `SourceCode` | Source Code | 代码块 | ` ```code``` ` |
-| `Compact` | Compact | 紧凑列表 | `- item` |
-| `TableGrid` | Table Grid | 表格 | `\| table \|` |
-| `Title` | Title | 文档标题 | `title:` (YAML) |
-| `Subtitle` | Subtitle | 副标题 | `subtitle:` (YAML) |
-
-
+| `Heading1` | Heading 1 | Level 1 Header | `# Title` |
+| `Heading2` | Heading 2 | Level 2 Header | `## Title` |
+| `Heading3` | Heading 3 | Level 3 Header | `### Title` |
+| `Heading4` | Heading 4 | Level 4 Header | `#### Title` |
+| `Heading5` | Heading 5 | Level 5 Header | `##### Title` |
+| `Heading6` | Heading 6 | Level 6 Header | `###### Title` |
+| `BodyText` | Body Text | Standard Paragraph | `Paragraph` |
+| `FirstParagraph` | First Paragraph | First para after header | (Automatic) |
+| `TableGrid` | Table Grid | Table style | `| table |` |
+| `Title` | Title | Document Title | `title:` (YAML) |
 
 ## Tools & Scripts
 
 ### `scripts/init_structure.ts`
 Scaffolds the project folder.
-- **Input**: structure.json (Recursive node array: `{ name, children[] }`)
+- **Input**: `structure.json` (Recursive node array)
 - **Output**: Directories and `content.md` files.
 
 ### `scripts/md2docx.ts` ⭐ UNIFIED WORKFLOW TOOL
-Complete Markdown to DOCX pipeline with high flexibility. No hardcoded project content.
-- **Folder-Driven Standardization**: 
-  - **Dynamic Title Generation**: Automatically converts folder names to headers.
-  - **Legacy Prefix Handling**: For backward compatibility, strips numeric sequence prefixes (like `01_`, `1. `, `2 `) if present. However, **new projects should NOT use numeric prefixes** in folder names.
-  - **Content Purity**: Enforces a standard where `content.md` contains only the body, while structure is defined by the file system.
-- **Modes**:
-  - `all`: Full automated pipeline (merge + convert)
-  - `merge`: Collect and merge content.md files into a single master Markdown
-  - `convert`: Transform any Markdown to DOCX using Pandoc and a reference template
-- **Features**:
-  - **Dynamic Configuration**: All project-specific metadata (name, author, toc-title) passed via CLI.
-  - **Smart Merging**: Hierarchical file collection with automatic folder sorting and heading level adjustment.
-  - **Zero-Config Defaults**: Sensible defaults for TOC depth and layout, overrideable via flags.
-  - **Template Support**: Uses `template.docx` for high-fidelity styling.
-- **Dependency**: Requires `pandoc` (globally installed) and a reference `template.docx`.
-- **Usage Examples**:
-  - Full pipeline: `bun run md2docx.ts all --pkg-root ./docs --name "Technical Solution" --author "Author Name"`
-  - Merge only: `bun run md2docx.ts merge --pkg-root ./01_Chapter --id "Chapter1_Draft"`
-  - Convert only: `bun run md2docx.ts convert Master.md Final.docx --template ref.docx`
-  - Custom TOC: `bun run md2docx.ts all --pkg-root . --toc-title "Index" --toc-depth 3`
+Complete Markdown to DOCX pipeline.
+- **Modes**: `all`, `merge`, `convert`.
+- **Features**: Dynamic configuration, smart merging, and hierarchical file collection.
+- **Dependency**: Requires `pandoc` and a reference document via `--template`.
 
 ### `scripts/check_stats.ts` ⭐ UNIFIED ANALYSIS TOOL
-Comprehensive document statistics and validation.
-- **Modes**:
-  - `--md <dir>`: Count characters and estimate pages from Markdown
-  - `--docx <file> [target]`: Extract actual page count from DOCX
-  - `--all <dir> <docx>`: Compare estimated vs actual pages
-- **Features**:
-  - Character counting with preprocessing (removes code blocks, comments)
-  - DOCX metadata extraction from `docProps/app.xml`
-  - Target validation with exit codes (0=success, 1=short)
-  - Accuracy comparison and calibration advice
-- **Usage Examples**:
-  - Estimate pages: `bun run check_stats.ts ./project`
-  - Validate DOCX: `bun run check_stats.ts --docx output.docx 150`
-  - Compare: `bun run check_stats.ts --all ./project output.docx`
+Document statistics and validation.
+- **Modes**: `--md`, `--docx`.
+- **Usage**: Estimate page counts and validate deliverables.
 

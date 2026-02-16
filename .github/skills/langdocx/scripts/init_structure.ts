@@ -35,9 +35,9 @@ async function createStructure(nodes: Node[], parentPath: string) {
         await mkdir(currentPath, { recursive: true });
         console.log(`Created directory: ${currentPath}`);
 
-        // Create content.md if content is provided or if it's a leaf node (optional policy)
-        // Here we always create content.md if 'content' text is present, or just an empty one with title
-        const contentText = node.content || `# ${node.name.replace(/^\d+_/, '')}\n\n<!-- content placeholder -->\n`;
+        // Create content.md if content is provided, otherwise initialize with placeholder only.
+        // Keep file body header-free; section hierarchy is defined by folder structure.
+        const contentText = node.content || `<!-- content placeholder -->\n`;
         await write(join(currentPath, "content.md"), contentText);
         console.log(`Created file: ${join(currentPath, "content.md")}`);
 
