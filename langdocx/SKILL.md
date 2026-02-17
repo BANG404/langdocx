@@ -1,6 +1,6 @@
 ---
 name: langdocx
-description: Specialist skill for authoring long-form technical proposals (50-200 pages) and performing high-fidelity document format cloning. Features automated directory structure generation, multi-file merging, and semantic style extraction from reference DOCX files.
+description: Specialist skill for authoring long-form documents and performing high-fidelity document format cloning. Features automated directory structure generation, multi-file merging, and semantic style extraction from reference DOCX files.
 license: Apache-2.0
 compatibility: "Run with Bun. Requires Pandoc."
 metadata:
@@ -14,14 +14,14 @@ This skill transforms the workspace into a professional **Technical Document Fac
 
 ## Best Practices & Agent Strategies
 
-*   **Subagent Concurrency**: When generating large-scale content (e.g., 100+ pages), use subagents to draft multiple `content.md` files in parallel to maximize throughput and maintain consistent detail across chapters.
+*   **Subagent Concurrency**: When generating large-scale content, use subagents to draft multiple `content.md` files in parallel to maximize throughput and maintain consistent detail across chapters.
 *   **Progressive Drafting**: Start with a detailed `structure.json`, then initialize the folders, and systematically fill the sections.
 *   **Pathing**: Always run scripts relative to the skill root if possible, or use the full path provided in the examples.
 
 ## Key Patterns
 
 ### Scenario 1: Authoring Long Technical Documents
-Use this workflow when the user asks to "write a 100-page solution" or "expand this into a full technical proposal".
+Use this workflow when the user asks to "write a long-form document".
 
 1.  **Analyze & Design**:
     *   Review requirements.

@@ -4,7 +4,7 @@
 
 ## English
 
-`langdocx` is an expert-level agent skill designed for authoring long-form technical proposals (50-200 pages) and performing high-fidelity document format cloning. It features automated directory structure generation, multi-file merging, and semantic style extraction from reference DOCX files.
+`langdocx` is an expert-level agent skill designed for authoring long-form documents and performing high-fidelity document format cloning. It features automated directory structure generation, multi-file merging, and semantic style extraction from reference DOCX files.
 
 ### Key Features
 - **Long-form Authoring**: Automated generation of hierarchical folders and Markdown content.
@@ -47,7 +47,7 @@
 
 ## 中文
 
-`langdocx` 是一个专为编写长篇技术建议书（50-200页）和执行高保真文档格式克隆而设计的专家级技能。它提供了自动化目录结构生成、多文件合并以及从参考 DOCX 文件中提取语义样式的功能。
+`langdocx` 是一个专为编写长篇文档和执行高保真文档格式克隆而设计的专家级技能。它提供了自动化目录结构生成、多文件合并以及从参考 DOCX 文件中提取语义样式的功能。
 
 ### 功能特性
 - **长文档编写**：自动化生成符合层级结构的文件夹和 Markdown 文件。
