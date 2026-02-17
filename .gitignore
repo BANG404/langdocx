@@ -1,5 +1,4 @@
-.github/instructions/*
-
+.github/
 test
 node_modules
 changzhou_audit_p2
