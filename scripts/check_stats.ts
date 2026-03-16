@@ -1,23 +1,16 @@
 #!/usr/bin/env bun
-import { $ } from "bun";
 import { readdir } from "node:fs/promises";
 import { join } from "path";
 
 /**
- * check_stats.ts - Unified Document Statistics Tool
- * 
- * Provides multiple analysis modes:
- * - MD analysis: Count characters and estimate pages from Markdown files
- * - DOCX analysis: Extract actual page count from generated DOCX files
- * - Combined analysis: Compare estimated vs actual pages
- * 
+ * check_stats.ts - Document Character Count & Validation Tool
+ *
  * Usage:
- *   bun run check_stats.ts --md <dir>              # Analyze Markdown directory
- *   bun run check_stats.ts --docx <file> [target]  # Check DOCX page count
- *   bun run check_stats.ts [dir]                   # Analyze Markdown (default)
+ *   bun run check_stats.ts --md <dir> [min-chars]   # Analyze Markdown directory
+ *   bun run check_stats.ts [dir] [min-chars]         # Analyze Markdown (default)
+ *
+ * min-chars: Minimum character count threshold for document completion check
  */
-
-// const WORDS_PER_PAGE = 800; // Removed per user request
 
 /**
  * Count characters in Markdown files recursively and detect placeholders
@@ -63,79 +56,47 @@ async function countMarkdownChars(dir: string): Promise<{ chars: number; files: 
 }
 
 /**
- * Extract page count from DOCX file's metadata
- */
-async function getDocxPageCount(docxPath: string): Promise<number> {
-    try {
-        // Extract app.xml from docx (which is a zip archive)
-        const tempDir = `/tmp/docx_check_${Date.now()}`;
-        await $`mkdir -p ${tempDir}`;
-        await $`unzip -q ${docxPath} -d ${tempDir}`;
-        
-        const appXmlPath = join(tempDir, "docProps/app.xml");
-        const appXml = await Bun.file(appXmlPath).text();
-        
-        // Parse <Pages>N</Pages> tag
-        const match = appXml.match(/<Pages>(\d+)<\/Pages>/);
-        const pageCount = match ? parseInt(match[1]) : 0;
-        
-        // Cleanup
-        await $`rm -rf ${tempDir}`;
-        
-        return pageCount;
-    } catch (error) {
-        console.error("Error reading DOCX page count:", error);
-        return 0;
-    }
-}
-
-/**
  * Analyze Markdown directory
  */
-async function analyzeMarkdown(dir: string): Promise<void> {
+async function analyzeMarkdown(dir: string, minChars?: number): Promise<boolean> {
     console.log(`\n📊 Analyzing Markdown files in: ${dir}\n`);
     
     const { chars, files, placeholders } = await countMarkdownChars(dir);
     
     console.log(`Files analyzed:    ${files}`);
     console.log(`Total characters:  ${chars.toLocaleString()}`);
+    
+    // Check character count threshold
+    let charThresholdMet = true;
+    if (minChars !== undefined) {
+        const percentage = ((chars / minChars) * 100).toFixed(1);
+        console.log(`\n📏 Character Count Check:`);
+        console.log(`   Target:     ${minChars.toLocaleString()} chars`);
+        console.log(`   Current:    ${chars.toLocaleString()} chars`);
+        console.log(`   Completion: ${percentage}%`);
+        
+        if (chars >= minChars) {
+            const surplus = chars - minChars;
+            console.log(`   ✅ Target met! (+${surplus.toLocaleString()} chars)`);
+        } else {
+            const shortage = minChars - chars;
+            console.log(`   ❌ Short by ${shortage.toLocaleString()} chars`);
+            charThresholdMet = false;
+        }
+    }
 
+    // Check for placeholders
+    let placeholderCheckPassed = true;
     if (placeholders.length > 0) {
         console.log(`\n⚠️  Found ${placeholders.length} files with placeholders:`);
         placeholders.forEach(p => console.log(`   - ${p}`));
         console.log(`\n❌ Warning: Document is incomplete.`);
+        placeholderCheckPassed = false;
     } else {
         console.log(`\n✅ No placeholders found. Content complete!`);
     }
-}
-
-/**
- * Analyze DOCX file
- */
-async function analyzeDocx(docxPath: string, targetPages?: number): Promise<boolean> {
-    console.log(`\n📄 Analyzing DOCX file: ${docxPath}\n`);
     
-    const actualPages = await getDocxPageCount(docxPath);
-    
-    console.log(`Actual pages: ${actualPages}`);
-    
-    if (targetPages) {
-        const difference = actualPages - targetPages;
-        const percentage = ((actualPages / targetPages) * 100).toFixed(1);
-        
-        console.log(`Target pages: ${targetPages}`);
-        console.log(`Completion:   ${percentage}%`);
-        
-        if (difference >= 0) {
-            console.log(`✅ Target met! (${difference > 0 ? '+' + difference : difference} pages)`);
-            return true;
-        } else {
-            console.log(`❌ Short by ${Math.abs(difference)} pages`);
-            return false;
-        }
-    }
-    
-    return true;
+    return charThresholdMet && placeholderCheckPassed;
 }
 
 // ============ CLI Entry Point ============
@@ -145,13 +106,17 @@ if (import.meta.main) {
     if (args.length === 0 || args[0] === "--help") {
         console.log(`
 Usage:
-  bun run check_stats.ts --md <dir>               Analyze Markdown directory (stats only)
-  bun run check_stats.ts --docx <file> [target]   Check DOCX page count
-  bun run check_stats.ts [dir]                    Analyze Markdown (default)
+  bun run check_stats.ts --md <dir> [min-chars]   Analyze Markdown directory
+  bun run check_stats.ts [dir] [min-chars]         Analyze Markdown (default)
+
+Parameters:
+  dir:       Directory containing Markdown files
+  min-chars: Minimum character count threshold (optional)
 
 Examples:
   bun run check_stats.ts ./01_TechnicalProposal
-  bun run check_stats.ts --docx Package1_Complete_Draft.docx 50
+  bun run check_stats.ts ./01_TechnicalProposal 50000
+  bun run check_stats.ts --md ./project 100000
 `);
         process.exit(1);
     }
@@ -160,14 +125,14 @@ Examples:
         const mode = args[0];
         
         if (mode === "--md" && args.length >= 2) {
-            await analyzeMarkdown(args[1]);
-        } else if (mode === "--docx" && args.length >= 2) {
-            const target = args[2] ? parseInt(args[2]) : undefined;
-            const success = await analyzeDocx(args[1], target);
+            const minChars = args[2] ? parseInt(args[2]) : undefined;
+            const success = await analyzeMarkdown(args[1], minChars);
             process.exit(success ? 0 : 1);
         } else if (!mode.startsWith("--")) {
             // Default: analyze markdown
-            await analyzeMarkdown(mode);
+            const minChars = args[1] ? parseInt(args[1]) : undefined;
+            const success = await analyzeMarkdown(mode, minChars);
+            process.exit(success ? 0 : 1);
         } else {
             console.error("Invalid arguments. Use --help for usage information.");
             process.exit(1);
